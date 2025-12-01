@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>YouTube Timer SPA</title>
+    <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+    <main class="container">
+        <h1>YouTube + Timer</h1>
+
+        <div id="player" class="player-placeholder"></div>
+
+        <div class="controls">
+            <button id="playBtn" class="btn">Play</button>
+            <button id="stopBtn" class="btn">Stop</button>
+            <button id="resetBtn" class="btn">Reset</button>
+        </div>
+
+        <div id="timer" class="timer">00:00:00</div>
+
+        <!-- New: FPS input and tick counter -->
+        <section class="fps-section">
+            <label for="fpsInput">Frames per second (FPS):</label>
+            <input id="fpsInput" type="number" min="1" step="1" value="30" />
+            <div id="tickCounter" class="tick-counter">Ticks: 0</div>
+        </section>
+
+        <!-- New: Skip controls (ticks or seconds) -->
+        <section class="skip-section">
+            <fieldset>
+                <legend>Skip video</legend>
+
+                <label for="skipAmount">Amount:</label>
+                <input id="skipAmount" type="number" min="0" step="1" value="1" />
+
+                <label for="skipUnit">Unit:</label>
+                <select id="skipUnit">
+                    <option value="ticks">Ticks</option>
+                    <option value="seconds">Seconds</option>
+                </select>
+
+                <div class="skip-buttons">
+                    <button id="skipBackBtn" class="btn">Skip −</button>
+                    <button id="skipForwardBtn" class="btn">Skip +</button>
+                </div>
+
+                <small>Enter a positive number and use Skip − / Skip + to seek backward or forward.</small>
+            </fieldset>
+        </section>
+    </main>
+
+    <!-- YouTube IFrame API -->
+    <script src="https://www.youtube.com/iframe_api"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

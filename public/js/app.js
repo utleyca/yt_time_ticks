@@ -1,0 +1,238 @@
+(function () {
+    'use strict';
+
+    // Default YouTube video id (change as needed)
+    const VIDEO_ID = 'dQw4w9WgXcQ';
+    const DEFAULT_FPS = 60;
+
+    let player = null;
+
+    // Timer state (milliseconds)
+    let accumulatedMs = 0;
+    let lastStartMs = 0;
+    let running = false;
+    let rafId = 0;
+    let fps = DEFAULT_FPS;
+
+    const timerEl = () => document.getElementById('timer');
+    const fpsInputEl = () => document.getElementById('fpsInput');
+    const tickCounterEl = () => document.getElementById('tickCounter');
+
+    function pad(n) {
+        return String(n).padStart(2, '0');
+    }
+
+    // Format milliseconds -> MM:ss:ff (hundredths)
+    function formatMs(ms) {
+        const totalHundredths = Math.floor(ms / 10);
+        const minutes = Math.floor(totalHundredths / 6000);
+        const seconds = Math.floor((totalHundredths % 6000) / 100);
+        const hundredths = totalHundredths % 100;
+        return `${pad(minutes)}:${pad(seconds)}:${pad(hundredths)}`;
+    }
+
+    // Convert elapsed ms and current fps to tick count (integer)
+    function computeTicks(ms, fpsValue) {
+        const seconds = ms / 1000;
+        return Math.floor(seconds * Math.max(0, Number(fpsValue) || DEFAULT_FPS));
+    }
+
+    function updateUi() {
+        const now = performance.now();
+        const elapsed = accumulatedMs + (running ? (now - lastStartMs) : 0);
+
+        const tEl = timerEl();
+        if (tEl) tEl.textContent = formatMs(elapsed);
+
+        const ticks = computeTicks(elapsed, fps);
+        const tickEl = tickCounterEl();
+        if (tickEl) tickEl.textContent = `Ticks: ${ticks}`;
+    }
+
+    function tick() {
+        updateUi();
+        if (running) {
+            rafId = requestAnimationFrame(tick);
+        }
+    }
+
+    // YouTube API ready callback (global name required by API)
+    window.onYouTubeIframeAPIReady = function () {
+        if (player) return;
+        player = new YT.Player('player', {
+            height: '360',
+            width: '640',
+            videoId: VIDEO_ID,
+            playerVars: { controls: 1, rel: 0 },
+            events: {
+                onReady: function () { /* no-op */ },
+                onStateChange: function () { /* optional */ }
+            }
+        });
+    };
+
+    function play() {
+        if (!running) {
+            lastStartMs = performance.now();
+            running = true;
+            if (!rafId) rafId = requestAnimationFrame(tick);
+        }
+        if (player && player.playVideo) player.playVideo();
+        updateUi();
+    }
+
+    function stop() {
+        if (running) {
+            accumulatedMs += performance.now() - lastStartMs;
+            running = false;
+            if (rafId) {
+                cancelAnimationFrame(rafId);
+                rafId = 0;
+            }
+        }
+        if (player && player.pauseVideo) player.pauseVideo();
+        updateUi();
+    }
+
+    // Reset: seek video to start, reset timer/ticks and start running
+    function reset() {
+        // Reset timer state to zero and start immediately
+        accumulatedMs = 0;
+        lastStartMs = performance.now();
+        running = true;
+
+        // Ensure RAF loop is running
+        if (!rafId) rafId = requestAnimationFrame(tick);
+
+        // Seek video to start and play (if player available)
+        if (player) {
+            if (typeof player.seekTo === 'function') {
+                try {
+                    player.seekTo(0, true);
+                } catch (e) {
+                    // ignore seek errors
+                }
+            }
+            if (player.playVideo) player.playVideo();
+        }
+
+        updateUi();
+    }
+
+    // Helper: clamp number between min and max
+    function clamp(v, min, max) {
+        return Math.max(min, Math.min(max, v));
+    }
+
+    // Seek logic used by skip controls
+    // amount: positive number from UI, unit: 'ticks'|'seconds', direction: -1 or +1
+    function skipBy(amount, unit, direction) {
+        const numeric = Number(amount);
+        if (!Number.isFinite(numeric) || numeric < 0 || (direction !== -1 && direction !== 1)) {
+            return;
+        }
+
+        // compute delta in seconds
+        const unitSec = (unit === 'ticks') ? (numeric / Math.max(1, fps)) : numeric;
+        const deltaSec = direction * unitSec;
+
+        // determine current time (prefer player, fallback to timer)
+        let currentSec = 0;
+        if (player && typeof player.getCurrentTime === 'function') {
+            try {
+                currentSec = Number(player.getCurrentTime()) || 0;
+            } catch (e) {
+                currentSec = (accumulatedMs + (running ? (performance.now() - lastStartMs) : 0)) / 1000;
+            }
+        } else {
+            currentSec = (accumulatedMs + (running ? (performance.now() - lastStartMs) : 0)) / 1000;
+        }
+
+        // try to get duration for clamping
+        let durationSec = Infinity;
+        if (player && typeof player.getDuration === 'function') {
+            try {
+                const d = Number(player.getDuration());
+                if (Number.isFinite(d) && d > 0) durationSec = d;
+            } catch (e) {
+                // ignore
+            }
+        }
+
+        const newSec = clamp(currentSec + deltaSec, 0, durationSec);
+
+        // update timer state so displayed timer matches video position
+        if (running) {
+            // set accumulated so accumulated + (now - lastStartMs) === newSec*1000
+            accumulatedMs = Math.max(0, newSec * 1000 - (performance.now() - lastStartMs));
+        } else {
+            accumulatedMs = Math.max(0, newSec * 1000);
+        }
+
+        // seek player if possible
+        if (player && typeof player.seekTo === 'function') {
+            try {
+                player.seekTo(newSec, true);
+            } catch (e) {
+                // ignore seek errors
+            }
+        }
+
+        updateUi();
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        const playBtn = document.getElementById('playBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const fpsInput = fpsInputEl();
+        const tickEl = tickCounterEl();
+
+        // Skip controls
+        const skipAmountEl = document.getElementById('skipAmount');
+        const skipUnitEl = document.getElementById('skipUnit');
+        const skipBackBtn = document.getElementById('skipBackBtn');
+        const skipForwardBtn = document.getElementById('skipForwardBtn');
+
+        playBtn.addEventListener('click', play);
+        stopBtn.addEventListener('click', stop);
+        if (resetBtn) resetBtn.addEventListener('click', reset);
+
+        // Initialize fps UI and events
+        if (fpsInput) {
+            fps = Number(fpsInput.value) || DEFAULT_FPS;
+            fpsInput.addEventListener('input', function (e) {
+                const v = Number(e.target.value);
+                fps = (Number.isFinite(v) && v > 0) ? v : DEFAULT_FPS;
+                // update immediately so ticks reflect new fps
+                updateUi();
+            });
+        }
+
+        // Wire skip buttons
+        if (skipBackBtn && skipForwardBtn && skipAmountEl && skipUnitEl) {
+            skipBackBtn.addEventListener('click', function () {
+                skipBy(skipAmountEl.value, skipUnitEl.value, -1);
+            });
+            skipForwardBtn.addEventListener('click', function () {
+                skipBy(skipAmountEl.value, skipUnitEl.value, 1);
+            });
+        }
+
+        // Ensure tick counter exists
+        if (tickEl && tickEl.textContent.trim() === '') {
+            tickEl.textContent = 'Ticks: 0';
+        }
+
+        // If YouTube API already loaded before DOMContentLoaded
+        if (typeof YT !== 'undefined' && YT && YT.Player && !player) {
+            window.onYouTubeIframeAPIReady();
+        }
+
+        // Initial render
+        updateUi();
+    });
+
+    // expose functions for debugging if needed
+    window.ytTimer = { play, stop, reset, formatMs, computeTicks, skipBy };
+})();
