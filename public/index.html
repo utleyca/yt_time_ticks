@@ -18,7 +18,12 @@
             <button id="resetBtn" class="btn">Reset</button>
         </div>
 
-        <div id="timer" class="timer">00:00:00</div>
+        <div class="timers">
+            <div id="timer" class="timer">00:00:00</div>
+            <div id="playerTimer" class="timer">00:00:00</div>
+            <!-- New: 10-second average delta between timer and playerTimer -->
+            <div id="delta10sAvg" class="timer delta">Δ (10s avg): 00:00:00</div>
+        </div>
 
         <!-- New: FPS input and tick counter -->
         <section class="fps-section">

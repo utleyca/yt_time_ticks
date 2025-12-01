@@ -1,4 +1,4 @@
-/* Plan (pseudocode):
+﻿/* Plan (pseudocode):
    - Keep two independent clocks:
      - wallElapsed: derived from accumulatedMs + running interval (unchanged).
      - tick-based clock: advances only from its own accumulator (tickAccumMs) using appliedFps.
@@ -36,7 +36,13 @@
     let tickAccumMs = 0;
     let lastTickUpdateMs = 0;
 
+    // Samples for calculating the 10-second moving-average delta between wall timer and player timer
+    // Each sample: { t: timestampMs, deltaMs: (wallElapsed - playerMs) }
+    let deltaSamples = [];
+
     const timerEl = () => document.getElementById('timer');
+    const playerTimerEl = () => document.getElementById('playerTimer');
+    const delta10sAvgEl = () => document.getElementById('delta10sAvg');
     const fpsInputEl = () => document.getElementById('fpsInput');
     const tickCounterEl = () => document.getElementById('tickCounter');
     const appliedFpsDisplayEl = () => document.getElementById('appliedFpsDisplay');
@@ -68,6 +74,53 @@
         // Continuous wall-clock display
         const tEl = timerEl();
         if (tEl) tEl.textContent = formatMs(elapsed);
+
+        // Compute player-derived timestamp (reads directly from the YouTube player when available)
+        // Do this independent of whether the playerTimer DOM node exists so delta calculation
+        // uses a correct playerMs fallback (wall elapsed) if player is unavailable.
+        let playerMs = Math.round(elapsed);
+        if (player && typeof player.getCurrentTime === 'function') {
+            try {
+                const secs = Number(player.getCurrentTime());
+                if (Number.isFinite(secs) && secs >= 0) {
+                    playerMs = Math.round(secs * 1000);
+                }
+            } catch (e) {
+                // keep fallback playerMs = elapsed
+            }
+        }
+
+        // Update playerTimer element if present
+        const pEl = playerTimerEl();
+        if (pEl) pEl.textContent = formatMs(playerMs);
+
+        // Update 10-second average delta samples and UI
+        // delta is wallElapsed - playerMs (positive means wall clock ahead of player)
+        const deltaEl = delta10sAvgEl();
+        if (deltaEl) {
+            // add current sample
+            deltaSamples.push({ t: now, deltaMs: Math.round(elapsed - playerMs) });
+
+            // remove samples older than 10 seconds
+            const windowMs = 10000;
+            while (deltaSamples.length && (now - deltaSamples[0].t > windowMs)) {
+                deltaSamples.shift();
+            }
+
+            // compute average
+            let avgMs = 0;
+            if (deltaSamples.length) {
+                const sum = deltaSamples.reduce((s, v) => s + v.deltaMs, 0);
+                avgMs = Math.round(sum / deltaSamples.length);
+            }
+
+            // display signed average with formatted absolute time
+            const sign = avgMs > 0 ? '+' : (avgMs < 0 ? '-' : '');
+            deltaEl.textContent = `Δ (10s avg): ${sign}${formatMs(Math.abs(avgMs))}`;
+
+            // lightweight debug to confirm delta update path executed (remove when satisfied)
+            console.debug('delta10sAvg updated', { avgMs, samples: deltaSamples.length });
+        }
 
         // Advance tick state independently while running
         if (running) {
@@ -102,8 +155,6 @@
         if (calcEl) {
             if (tickCount !== lastShownTick) {
                 lastShownTick = tickCount;
-                // Use a fixed baseline FPS for time conversion so raising appliedFps
-                // increases tick accumulation rate relative to wall clock.
                 const calcMs = Math.round((tickCount / DEFAULT_FPS) * 1000);
                 calcEl.textContent = `Calculated: ${formatMs(calcMs)}`;
             }
@@ -130,6 +181,9 @@
                 onStateChange: function () { /* optional */ }
             }
         });
+
+        // Ensure UI shows player time as soon as player exists
+        updateUi();
     };
 
     function play() {
@@ -168,6 +222,9 @@
         tickCount = 0;
         tickAccumMs = 0;
         lastTickUpdateMs = performance.now();
+
+        // reset delta samples for the 10s average
+        deltaSamples = [];
 
         // ensure calculated clock updates immediately
         lastShownTick = -1;
