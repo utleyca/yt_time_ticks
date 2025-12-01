@@ -1,3 +1,15 @@
+/* Plan (pseudocode):
+   - Keep two independent clocks:
+     - wallElapsed: derived from accumulatedMs + running interval (unchanged).
+     - tick-based clock: advances only from its own accumulator (tickAccumMs) using appliedFps.
+   - Ensure we NEVER resync tickCount to the wall clock except on explicit reset.
+   - On Apply FPS: change appliedFps but do NOT recompute tickCount from wall time; reset tickAccumMs so the new rate takes effect cleanly.
+   - On Skip: seek the video and update the wall timer state (accumulatedMs) but do NOT touch tickCount or its accumulators.
+   - When paused (running === false): stop advancing tickAccumMs but do NOT set tickCount from wall clock.
+   - Reset still resets both clocks to zero (intended behavior).
+   - Keep UI updates minimal: wall timer, tick counter, applied FPS, calculated tick-based time (only update when tickCount changes).
+*/
+
 (function () {
     'use strict';
 
@@ -12,11 +24,23 @@
     let lastStartMs = 0;
     let running = false;
     let rafId = 0;
-    let fps = DEFAULT_FPS;
+
+    // appliedFps is the value actually used in math (changed only when Apply is clicked)
+    let appliedFps = DEFAULT_FPS;
+
+    // lastShownTick ensures the calculated clock only updates when the integer tick changes
+    let lastShownTick = -1;
+
+    // Independent tick/tick-accumulator state so tick/FPS clock can run separately
+    let tickCount = 0;
+    let tickAccumMs = 0;
+    let lastTickUpdateMs = 0;
 
     const timerEl = () => document.getElementById('timer');
     const fpsInputEl = () => document.getElementById('fpsInput');
     const tickCounterEl = () => document.getElementById('tickCounter');
+    const appliedFpsDisplayEl = () => document.getElementById('appliedFpsDisplay');
+    const calculatedTimeEl = () => document.getElementById('calculatedTime');
 
     function pad(n) {
         return String(n).padStart(2, '0');
@@ -41,12 +65,49 @@
         const now = performance.now();
         const elapsed = accumulatedMs + (running ? (now - lastStartMs) : 0);
 
+        // Continuous wall-clock display
         const tEl = timerEl();
         if (tEl) tEl.textContent = formatMs(elapsed);
 
-        const ticks = computeTicks(elapsed, fps);
+        // Advance tick state independently while running
+        if (running) {
+            if (!lastTickUpdateMs) lastTickUpdateMs = now;
+            const delta = now - lastTickUpdateMs;
+            lastTickUpdateMs = now;
+            tickAccumMs += delta;
+
+            const msPerTick = 1000 / Math.max(1, appliedFps);
+            if (tickAccumMs >= msPerTick) {
+                const newTicks = Math.floor(tickAccumMs / msPerTick);
+                tickCount += newTicks;
+                tickAccumMs -= newTicks * msPerTick;
+            }
+        } else {
+            // When paused/stopped: do NOT resync tickCount to the wall clock.
+            // Just stop advancing tickAccumMs and clear lastTickUpdateMs so
+            // timing restarts fresh on resume.
+            lastTickUpdateMs = 0;
+        }
+
+        // Update tick counter element
         const tickEl = tickCounterEl();
-        if (tickEl) tickEl.textContent = `Ticks: ${ticks}`;
+        if (tickEl) tickEl.textContent = `Ticks: ${tickCount}`;
+
+        // Applied FPS display
+        const afEl = appliedFpsDisplayEl();
+        if (afEl) afEl.textContent = `Applied FPS: ${appliedFps}`;
+
+        // Calculated (quantized) clock derived from tickCount (independent)
+        const calcEl = calculatedTimeEl();
+        if (calcEl) {
+            if (tickCount !== lastShownTick) {
+                lastShownTick = tickCount;
+                // Use a fixed baseline FPS for time conversion so raising appliedFps
+                // increases tick accumulation rate relative to wall clock.
+                const calcMs = Math.round((tickCount / DEFAULT_FPS) * 1000);
+                calcEl.textContent = `Calculated: ${formatMs(calcMs)}`;
+            }
+        }
     }
 
     function tick() {
@@ -74,6 +135,8 @@
     function play() {
         if (!running) {
             lastStartMs = performance.now();
+            // start tick update timing separate from lastStartMs
+            lastTickUpdateMs = performance.now();
             running = true;
             if (!rafId) rafId = requestAnimationFrame(tick);
         }
@@ -100,6 +163,14 @@
         accumulatedMs = 0;
         lastStartMs = performance.now();
         running = true;
+
+        // reset tick state (reset both clocks)
+        tickCount = 0;
+        tickAccumMs = 0;
+        lastTickUpdateMs = performance.now();
+
+        // ensure calculated clock updates immediately
+        lastShownTick = -1;
 
         // Ensure RAF loop is running
         if (!rafId) rafId = requestAnimationFrame(tick);
@@ -133,7 +204,7 @@
         }
 
         // compute delta in seconds
-        const unitSec = (unit === 'ticks') ? (numeric / Math.max(1, fps)) : numeric;
+        const unitSec = (unit === 'ticks') ? (numeric / Math.max(1, appliedFps)) : numeric;
         const deltaSec = direction * unitSec;
 
         // determine current time (prefer player, fallback to timer)
@@ -161,13 +232,21 @@
 
         const newSec = clamp(currentSec + deltaSec, 0, durationSec);
 
-        // update timer state so displayed timer matches video position
+        // update timer state so displayed wall clock matches video position
         if (running) {
             // set accumulated so accumulated + (now - lastStartMs) === newSec*1000
             accumulatedMs = Math.max(0, newSec * 1000 - (performance.now() - lastStartMs));
+            // Do NOT modify tickCount or tickAccumMs - tick clock is independent.
+            lastTickUpdateMs = performance.now();
         } else {
             accumulatedMs = Math.max(0, newSec * 1000);
+            // Do NOT modify tickCount or tickAccumMs - tick clock is independent.
+            lastTickUpdateMs = 0;
         }
+
+        // Do not resync tick clock; calculated clock will update only when tickCount changes
+        // ensure wall-clock updates immediately
+        updateUi();
 
         // seek player if possible
         if (player && typeof player.seekTo === 'function') {
@@ -177,8 +256,6 @@
                 // ignore seek errors
             }
         }
-
-        updateUi();
     }
 
     document.addEventListener('DOMContentLoaded', function () {
@@ -187,6 +264,8 @@
         const resetBtn = document.getElementById('resetBtn');
         const fpsInput = fpsInputEl();
         const tickEl = tickCounterEl();
+        const applyFpsBtn = document.getElementById('applyFpsBtn');
+        const appliedFpsEl = appliedFpsDisplayEl();
 
         // Skip controls
         const skipAmountEl = document.getElementById('skipAmount');
@@ -198,15 +277,62 @@
         stopBtn.addEventListener('click', stop);
         if (resetBtn) resetBtn.addEventListener('click', reset);
 
-        // Initialize fps UI and events
+        // commitAppliedFps: centralize parsing/validation and UI update for Apply
+        function commitAppliedFps() {
+            if (!fpsInput) return false;
+            const raw = fpsInput.value;
+            const v = Number(raw);
+            const valid = Number.isFinite(v) && v > 0;
+            if (!valid) return false;
+
+            // Do NOT resync tickCount from wall clock; make the tick clock use the new rate going forward.
+            appliedFps = v;
+            // Reset accumulator so the new FPS takes effect cleanly
+            tickAccumMs = 0;
+            lastTickUpdateMs = running ? performance.now() : 0;
+
+            lastShownTick = -1; // force recalculation of calculated clock on next tick change
+            if (appliedFpsEl) appliedFpsEl.textContent = `Applied FPS: ${appliedFps}`;
+            updateUi();
+            return true;
+        }
+
+        // Initialize applied FPS from input
         if (fpsInput) {
-            fps = Number(fpsInput.value) || DEFAULT_FPS;
+            // set initial appliedFps from the input's starting value
+            appliedFps = Number(fpsInput.value) || DEFAULT_FPS;
+            if (appliedFpsEl) appliedFpsEl.textContent = `Applied FPS: ${appliedFps}`;
+
+            // Validate input on change and enable/disable Apply button
             fpsInput.addEventListener('input', function (e) {
                 const v = Number(e.target.value);
-                fps = (Number.isFinite(v) && v > 0) ? v : DEFAULT_FPS;
-                // update immediately so ticks reflect new fps
-                updateUi();
+                const valid = Number.isFinite(v) && v > 0;
+                if (applyFpsBtn) applyFpsBtn.disabled = !valid;
             });
+
+            // support Enter key to apply the value
+            fpsInput.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') {
+                    // prevent form submission if ever inside a form
+                    e.preventDefault();
+                    if (commitAppliedFps() && applyFpsBtn) {
+                        // optional: provide brief feedback by focusing button
+                        applyFpsBtn.focus();
+                    }
+                }
+            });
+        }
+
+        // Apply button commits the FPS into the math
+        if (applyFpsBtn) {
+            applyFpsBtn.addEventListener('click', function () {
+                commitAppliedFps();
+            });
+            // initial enable state
+            if (fpsInput) {
+                const v = Number(fpsInput.value);
+                applyFpsBtn.disabled = !(Number.isFinite(v) && v > 0);
+            }
         }
 
         // Wire skip buttons
@@ -228,6 +354,11 @@
         if (typeof YT !== 'undefined' && YT && YT.Player && !player) {
             window.onYouTubeIframeAPIReady();
         }
+
+        // Initial tick state: keep independent (start at 0)
+        tickCount = 0;
+        tickAccumMs = 0;
+        lastTickUpdateMs = 0;
 
         // Initial render
         updateUi();

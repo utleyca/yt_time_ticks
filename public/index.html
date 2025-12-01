@@ -23,7 +23,16 @@
         <!-- New: FPS input and tick counter -->
         <section class="fps-section">
             <label for="fpsInput">Frames per second (FPS):</label>
-            <input id="fpsInput" type="number" min="1" step="1" value="30" />
+            <input id="fpsInput" type="number" min="1" step="1" value="60" />
+            <!-- Apply button to commit new FPS into the math -->
+            <button id="applyFpsBtn" class="btn">Apply</button>
+
+            <!-- Display the FPS value actually used in calculations -->
+            <div id="appliedFpsDisplay" class="applied-fps">Applied FPS: 60</div>
+
+            <!-- Calculated time based on ticks and applied FPS -->
+            <div id="calculatedTime" class="calculated-time">Calculated: 00:00:00</div>
+
             <div id="tickCounter" class="tick-counter">Ticks: 0</div>
         </section>
 
