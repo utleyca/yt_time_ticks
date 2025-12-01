@@ -203,7 +203,7 @@
             return;
         }
 
-        // compute delta in seconds
+        // compute delta in seconds (unitSec is the magnitude, not clamped yet)
         const unitSec = (unit === 'ticks') ? (numeric / Math.max(1, appliedFps)) : numeric;
         const deltaSec = direction * unitSec;
 
@@ -232,19 +232,39 @@
 
         const newSec = clamp(currentSec + deltaSec, 0, durationSec);
 
+        // If skipping by ticks, adjust tickCount directly (so calculated values update).
+        // If skipping by seconds, optionally convert the actual jumped seconds into ticks
+        // and advance the tick clock so the UI matches the video skip.
+        if (unit === 'ticks') {
+            // Use integer ticks; round provided numeric to nearest integer
+            const deltaTicks = Math.round(numeric) * direction;
+            tickCount = Math.max(0, tickCount + deltaTicks);
+            // Force recalculation of calculated display immediately
+            lastShownTick = -1;
+        } else if (unit === 'seconds') {
+            // Compute the actual jumped seconds after clamping (may differ if clamped at 0 or duration)
+            const jumpedSec = newSec - currentSec;
+            // Convert seconds to ticks using appliedFps and apply the delta
+            const deltaTicks = Math.round(jumpedSec * appliedFps);
+            if (deltaTicks !== 0) {
+                tickCount = Math.max(0, tickCount + deltaTicks);
+                lastShownTick = -1;
+            }
+        }
+
         // update timer state so displayed wall clock matches video position
         if (running) {
             // set accumulated so accumulated + (now - lastStartMs) === newSec*1000
             accumulatedMs = Math.max(0, newSec * 1000 - (performance.now() - lastStartMs));
-            // Do NOT modify tickCount or tickAccumMs - tick clock is independent.
+            // Do NOT modify tickAccumMs - tick clock is independent.
             lastTickUpdateMs = performance.now();
         } else {
             accumulatedMs = Math.max(0, newSec * 1000);
-            // Do NOT modify tickCount or tickAccumMs - tick clock is independent.
+            // Do NOT modify tickAccumMs - tick clock is independent.
             lastTickUpdateMs = 0;
         }
 
-        // Do not resync tick clock; calculated clock will update only when tickCount changes
+        // Do not resync tick clock from wall clock beyond the explicit conversion above.
         // ensure wall-clock updates immediately
         updateUi();
 
