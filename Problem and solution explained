@@ -1,0 +1,37 @@
+﻿Explaniation from Discord:
+
+	YouTube API Wrapper → JS Clock Sync
+
+		Goal: Query video info and sync to a clock.
+		Mini-Challenge:
+
+		Use the YouTube Data API to fetch video duration + current time (e.g., live).
+
+		Sync it with a simple JS clock on a webpage.
+
+		Display video thumbnail + live timer.
+
+		Post screenshot + code.
+
+
+
+
+
+Explanation from Reddit:
+	https://www.reddit.com/r/javascript/comments/1oeza6g/askjs_how_would_you_sync_youtube_playback/?share_id=yEikLAM2PbpFMwWYbja_k&utm_content=1&utm_medium=android_app&utm_name=androidcss&utm_source=share&utm_term=1
+	[AskJS] How would you sync YouTube playback perfectly with a JS clock? 
+	(We turned this into a friendly coding challenge)
+
+
+Solution Explanation:
+	Youtubes internal clock is not time based. Instead it uses a tick based time system that is an interger 0-infinite.
+	
+	The project setup, demonstrates how a tick based system would solve this problem. Youtube renders at 30fps so that 
+	is the projects default. If you adjust the FPS rate in the project, you'll notice the timer will get out of sync. For this to work you 
+	need the FPS rate. The project is setup to skip ahead and  back using time or using ticks perfectly.
+	
+	The next level of this. you could add play back speed and use Youtubes double playback control while keeping in sync.
+
+
+Out of scope:
+	Ideally you would want something to monitor the FPS / buffering of the video to keep everything instep. This is all based on recieveing 30fps.
