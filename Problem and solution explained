@@ -30,7 +30,7 @@ Solution Explanation:
 	is the projects default. If you adjust the FPS rate in the project, you'll notice the timer will get out of sync. For this to work you 
 	need the FPS rate. The project is setup to skip ahead and  back using time or using ticks perfectly.
 	
-	The next level of this. you could add play back speed and use Youtubes double playback control while keeping in sync.
+	This soultion also allows tracking the time no matter what the YT player playback speed is set. You just need to know how to adjust the FPS setting to keep in sync.
 
 
 Out of scope:
