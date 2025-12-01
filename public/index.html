@@ -8,7 +8,7 @@
 </head>
 <body>
     <main class="container">
-        <h1>YouTube + Timer</h1>
+        <h1>Synchronization Example - YouTube Timer(60FPS) + 2nd Application(FiveM Server 20 TPS)</h1>
 
         <div id="player" class="player-placeholder"></div>
 
@@ -58,10 +58,31 @@
                 <small>Enter a positive number and use Skip − / Skip + to seek backward or forward.</small>
             </fieldset>
         </section>
+
+        <!-- New: FiveM Server section -->
+        <section class="fivem-section" aria-labelledby="fivemHeading">
+            <h2 id="fivemHeading">(FiveM Server) Syncronization Example</h2>
+
+            <!-- Display of current converter tick rate -->
+            <div id="fivemTickRate" class="fivem-tickrate">Tick Rate: 20</div>
+
+            <!-- Controls to adjust FiveM tick rate (TPS) -->
+            <label for="fivemTickRateInput">FiveM Tick Rate (TPS):</label>
+            <input id="fivemTickRateInput" type="number" min="1" step="1" value="20" />
+            <button id="applyFivemBtn" class="btn">Apply</button>
+
+            <div id="fivemCurrentTick" class="fivem-current-tick">Current Tick: 0</div>
+            <div id="fivemTime" class="fivem-time">Time: 00:00:00</div>
+            <small>Values reflect the FiveM-converted ticks/time and update on play/stop/reset/skip.</small>
+        </section>
     </main>
 
     <!-- YouTube IFrame API -->
     <script src="https://www.youtube.com/iframe_api"></script>
+
+    <!-- Ensure the TickConverter is available before app.js -->
+    <script src="js/FiveM_Tick_Converter.js"></script>
+
     <script src="js/app.js"></script>
 </body>
 </html>

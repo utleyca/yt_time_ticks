@@ -42,6 +42,13 @@
     const appliedFpsDisplayEl = () => document.getElementById('appliedFpsDisplay');
     const calculatedTimeEl = () => document.getElementById('calculatedTime');
 
+    // FiveM UI elements
+    const fivemTickRateEl = () => document.getElementById('fivemTickRate');
+    const fivemCurrentTickEl = () => document.getElementById('fivemCurrentTick');
+    const fivemTimeEl = () => document.getElementById('fivemTime');
+    const fivemTickRateInputEl = () => document.getElementById('fivemTickRateInput');
+    const applyFivemBtnEl = () => document.getElementById('applyFivemBtn');
+
     function pad(n) {
         return String(n).padStart(2, '0');
     }
@@ -106,6 +113,24 @@
                 // increases tick accumulation rate relative to wall clock.
                 const calcMs = Math.round((tickCount / DEFAULT_FPS) * 1000);
                 calcEl.textContent = `Calculated: ${formatMs(calcMs)}`;
+            }
+        }
+
+        // --- Sync to TickConverter (FiveM) and update FiveM UI ---
+        if (typeof TickConverter !== 'undefined' && TickConverter) {
+            try {
+                // Convert current app tickCount (which advances at appliedFps) into TickConverter's tick space
+                const fivemTicks = TickConverter.convertTickRateTicks(tickCount, appliedFps);
+                TickConverter.updateFromTicks(fivemTicks);
+
+                const fTickEl = fivemTickRateEl();
+                const fCurTickEl = fivemCurrentTickEl();
+                const fTimeEl = fivemTimeEl();
+                if (fTickEl) fTickEl.textContent = `Tick Rate: ${TickConverter.tickRate}`;
+                if (fCurTickEl) fCurTickEl.textContent = `Current Tick: ${TickConverter.ticks}`;
+                if (fTimeEl) fTimeEl.textContent = `Time: ${formatMs(TickConverter.timeMs)}`;
+            } catch (e) {
+                // silently ignore TickConverter errors to avoid breaking the main UI
             }
         }
     }
@@ -185,6 +210,13 @@
                 }
             }
             if (player.playVideo) player.playVideo();
+        }
+
+        // Reset TickConverter state as well (if present)
+        if (typeof TickConverter !== 'undefined' && TickConverter && typeof TickConverter.updateFromTicks === 'function') {
+            try {
+                TickConverter.updateFromTicks(0);
+            } catch (e) { /* ignore */ }
         }
 
         updateUi();
@@ -293,6 +325,10 @@
         const applyFpsBtn = document.getElementById('applyFpsBtn');
         const appliedFpsEl = appliedFpsDisplayEl();
 
+        // FiveM controls
+        const fivemInput = fivemTickRateInputEl();
+        const applyFivemBtn = applyFivemBtnEl();
+
         // Skip controls
         const skipAmountEl = document.getElementById('skipAmount');
         const skipUnitEl = document.getElementById('skipUnit');
@@ -321,6 +357,33 @@
             if (appliedFpsEl) appliedFpsEl.textContent = `Applied FPS: ${appliedFps}`;
             updateUi();
             return true;
+        }
+
+        // commitFivemTickRate: parse/validate and update TickConverter.tickRate
+        function commitFivemTickRate() {
+            if (!fivemInput) return false;
+            if (typeof TickConverter === 'undefined' || !TickConverter) return false;
+            const raw = fivemInput.value;
+            const v = Number(raw);
+            if (!Number.isFinite(v) || v <= 0) return false;
+
+            try {
+                // Update converter tick rate in-place (preserve state then recalc from app tickCount)
+                TickConverter.tickRate = v;
+                TickConverter.tickDurationMs = 1000 / v;
+
+                // Recompute converter state from current app tickCount (which uses appliedFps)
+                const fivemTicks = TickConverter.convertTickRateTicks(tickCount, appliedFps);
+                TickConverter.updateFromTicks(fivemTicks);
+
+                // update UI immediately
+                const fTickEl = fivemTickRateEl();
+                if (fTickEl) fTickEl.textContent = `Tick Rate: ${TickConverter.tickRate}`;
+                updateUi();
+                return true;
+            } catch (e) {
+                return false;
+            }
         }
 
         // Initialize applied FPS from input
@@ -361,6 +424,47 @@
             }
         }
 
+        // Initialize FiveM tick rate input and wiring if TickConverter available
+        if (fivemInput && applyFivemBtn) {
+            if (typeof TickConverter !== 'undefined' && TickConverter) {
+                // seed input with current converter tick rate
+                try {
+                    fivemInput.value = Number(TickConverter.tickRate) || 20;
+                } catch (e) {
+                    fivemInput.value = 20;
+                }
+            } else {
+                // if converter missing, disable controls
+                fivemInput.disabled = true;
+                applyFivemBtn.disabled = true;
+            }
+
+            // enable/disable apply button based on validity
+            fivemInput.addEventListener('input', function (e) {
+                const v = Number(e.target.value);
+                const valid = Number.isFinite(v) && v > 0;
+                applyFivemBtn.disabled = !valid;
+            });
+
+            // support Enter to apply
+            fivemInput.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (commitFivemTickRate() && applyFivemBtn) {
+                        applyFivemBtn.focus();
+                    }
+                }
+            });
+
+            applyFivemBtn.addEventListener('click', function () {
+                commitFivemTickRate();
+            });
+
+            // set initial enabled state
+            const initV = Number(fivemInput.value);
+            applyFivemBtn.disabled = !(Number.isFinite(initV) && initV > 0);
+        }
+
         // Wire skip buttons
         if (skipBackBtn && skipForwardBtn && skipAmountEl && skipUnitEl) {
             skipBackBtn.addEventListener('click', function () {
@@ -385,6 +489,21 @@
         tickCount = 0;
         tickAccumMs = 0;
         lastTickUpdateMs = 0;
+
+        // Initialize FiveM TickConverter UI if available
+        if (typeof TickConverter !== 'undefined' && TickConverter) {
+            try {
+                // ensure converter initialized (file already sets default)
+                const fTickEl = fivemTickRateEl();
+                const fCurTickEl = fivemCurrentTickEl();
+                const fTimeEl = fivemTimeEl();
+                if (fTickEl) fTickEl.textContent = `Tick Rate: ${TickConverter.tickRate}`;
+                if (fCurTickEl) fCurTickEl.textContent = `Current Tick: ${TickConverter.ticks}`;
+                if (fTimeEl) fTimeEl.textContent = `Time: ${formatMs(TickConverter.timeMs)}`;
+            } catch (e) {
+                // ignore
+            }
+        }
 
         // Initial render
         updateUi();
