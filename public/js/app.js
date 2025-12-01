@@ -203,20 +203,23 @@
             return;
         }
 
-        // compute delta in seconds (unitSec is the magnitude, not clamped yet)
-        const unitSec = (unit === 'ticks') ? (numeric / Math.max(1, appliedFps)) : numeric;
-        const deltaSec = direction * unitSec;
+        // Decide how many seconds the skip should represent
+        const requestedSec = (unit === 'ticks') ? (numeric / Math.max(1, DEFAULT_FPS)) : numeric;
+        const deltaSec = direction * requestedSec;
 
-        // determine current time (prefer player, fallback to timer)
-        let currentSec = 0;
+        // wall-derived current time (fallback)
+        const wallCurrentSec = (accumulatedMs + (running ? (performance.now() - lastStartMs) : 0)) / 1000;
+
+        // Prefer player current time as the baseline for seeking (so we SEEK RELATIVE to the player)
+        // If player not available, fall back to wall timer
+        let playerCurrentSec = wallCurrentSec;
         if (player && typeof player.getCurrentTime === 'function') {
             try {
-                currentSec = Number(player.getCurrentTime()) || 0;
+                const p = Number(player.getCurrentTime());
+                if (Number.isFinite(p)) playerCurrentSec = p;
             } catch (e) {
-                currentSec = (accumulatedMs + (running ? (performance.now() - lastStartMs) : 0)) / 1000;
+                playerCurrentSec = wallCurrentSec;
             }
-        } else {
-            currentSec = (accumulatedMs + (running ? (performance.now() - lastStartMs) : 0)) / 1000;
         }
 
         // try to get duration for clamping
@@ -230,48 +233,51 @@
             }
         }
 
-        const newSec = clamp(currentSec + deltaSec, 0, durationSec);
+        // compute the target player time by adding the delta (relative seek)
+        const targetPlayerSec = clamp(playerCurrentSec + deltaSec, 0, durationSec);
+        // actual jumped seconds might be different (if clamped)
+        const actualJumpedSec = targetPlayerSec - playerCurrentSec;
 
-        // If skipping by ticks, adjust tickCount directly (so calculated values update).
-        // If skipping by seconds, optionally convert the actual jumped seconds into ticks
-        // and advance the tick clock so the UI matches the video skip.
+        // Update tickCount according to the actual jumped seconds.
+        // - For 'ticks' unit we interpret the user's numeric as tick count but we should
+        //   adjust by the actual jumped seconds (in case of clamping) using DEFAULT_FPS so
+        //   both calculated display and wall timer remain consistent.
         if (unit === 'ticks') {
-            // Use integer ticks; round provided numeric to nearest integer
-            const deltaTicks = Math.round(numeric) * direction;
-            tickCount = Math.max(0, tickCount + deltaTicks);
-            // Force recalculation of calculated display immediately
-            lastShownTick = -1;
-        } else if (unit === 'seconds') {
-            // Compute the actual jumped seconds after clamping (may differ if clamped at 0 or duration)
-            const jumpedSec = newSec - currentSec;
-            // Convert seconds to ticks using appliedFps and apply the delta
-            const deltaTicks = Math.round(jumpedSec * appliedFps);
+            const actualTicks = Math.round(actualJumpedSec * DEFAULT_FPS);
+            if (actualTicks !== 0) {
+                tickCount = Math.max(0, tickCount + actualTicks);
+                lastShownTick = -1;
+            }
+        } else { // seconds unit
+            const deltaTicks = Math.round(actualJumpedSec * appliedFps);
             if (deltaTicks !== 0) {
                 tickCount = Math.max(0, tickCount + deltaTicks);
                 lastShownTick = -1;
             }
         }
 
-        // update timer state so displayed wall clock matches video position
+        // Update accumulatedMs by the actual jumped amount (relative update, not absolute set)
+        const now = performance.now();
+        const durationMs = isFinite(durationSec) ? durationSec * 1000 : Infinity;
+        const jumpMs = actualJumpedSec * 1000;
+
         if (running) {
-            // set accumulated so accumulated + (now - lastStartMs) === newSec*1000
-            accumulatedMs = Math.max(0, newSec * 1000 - (performance.now() - lastStartMs));
-            // Do NOT modify tickAccumMs - tick clock is independent.
+            // Clamp so elapsed (accumulated + (now - lastStartMs)) doesn't exceed duration
+            const maxAccum = Math.max(0, durationMs - (now - lastStartMs));
+            accumulatedMs = clamp(accumulatedMs + jumpMs, 0, maxAccum);
             lastTickUpdateMs = performance.now();
         } else {
-            accumulatedMs = Math.max(0, newSec * 1000);
-            // Do NOT modify tickAccumMs - tick clock is independent.
+            accumulatedMs = clamp(accumulatedMs + jumpMs, 0, durationMs);
             lastTickUpdateMs = 0;
         }
 
-        // Do not resync tick clock from wall clock beyond the explicit conversion above.
         // ensure wall-clock updates immediately
         updateUi();
 
-        // seek player if possible
+        // perform the actual seek on the player relative to its own current position
         if (player && typeof player.seekTo === 'function') {
             try {
-                player.seekTo(newSec, true);
+                player.seekTo(targetPlayerSec, true);
             } catch (e) {
                 // ignore seek errors
             }
